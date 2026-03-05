@@ -1,5 +1,9 @@
 # mut-state
 
+<p align="center">
+  <img src="./assets/mut-state-logo.svg" alt="mut-state logo" width="320" />
+</p>
+
 `mut-state` is a React state library with a mutable API and selector-based rerender control.
 
 You write updates like this:
