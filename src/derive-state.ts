@@ -2,6 +2,9 @@ import {
   createVersionedSnapshotController,
   GET_VERSIONED_SNAPSHOT,
   notifyListeners,
+  scheduleListeners,
+  subscribeImmediate,
+  SUBSCRIBE_IMMEDIATE,
 } from "./store-internals";
 import type { DeepReadonly, SourceLike, StateLike } from "./mute.types";
 import type { InternalStateLike } from "./store-internals";
@@ -34,19 +37,24 @@ export const derive = <Sources extends readonly SourceLike<unknown>[], Result>(
     currentState as DeepReadonly<Result>,
   );
   let sourceUnsubscribers: Array<() => void> = [];
-  const listeners = new Set<() => void>();
+  const immediateListeners = new Set<() => void>();
+  const scheduledListeners = new Set<() => void>();
+
+  const hasStateListeners = (): boolean =>
+    immediateListeners.size > 0 || scheduledListeners.size > 0;
 
   const recomputeState = (): void => {
     const nextState = projector(...getSourceValues(sources));
     if (Object.is(currentState, nextState)) return;
     currentState = nextState;
     versionedSnapshotController.commit(currentState as DeepReadonly<Result>);
-    notifyListeners(listeners);
+    notifyListeners(immediateListeners);
+    scheduleListeners(scheduledListeners);
   };
 
   const subscribeSources = (): void => {
     sourceUnsubscribers = sources.map((source) =>
-      source.subscribe(recomputeState),
+      subscribeImmediate(source, recomputeState),
     );
   };
 
@@ -61,11 +69,21 @@ export const derive = <Sources extends readonly SourceLike<unknown>[], Result>(
       throw new Error("Derived state is read-only.");
     },
     subscribe: (callback) => {
-      listeners.add(callback);
-      if (listeners.size === 1) subscribeSources();
+      const hasListenersBeforeSubscription = hasStateListeners();
+      scheduledListeners.add(callback);
+      if (!hasListenersBeforeSubscription) subscribeSources();
       return () => {
-        listeners.delete(callback);
-        if (listeners.size === 0) unsubscribeSources();
+        scheduledListeners.delete(callback);
+        if (!hasStateListeners()) unsubscribeSources();
+      };
+    },
+    [SUBSCRIBE_IMMEDIATE]: (callback) => {
+      const hasListenersBeforeSubscription = hasStateListeners();
+      immediateListeners.add(callback);
+      if (!hasListenersBeforeSubscription) subscribeSources();
+      return () => {
+        immediateListeners.delete(callback);
+        if (!hasStateListeners()) unsubscribeSources();
       };
     },
     [GET_VERSIONED_SNAPSHOT]: versionedSnapshotController.getSnapshot,

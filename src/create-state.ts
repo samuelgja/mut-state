@@ -2,6 +2,8 @@ import {
   createVersionedSnapshotController,
   GET_VERSIONED_SNAPSHOT,
   notifyListeners,
+  scheduleListeners,
+  SUBSCRIBE_IMMEDIATE,
 } from "./store-internals";
 import type { DeepReadonly, MutableDraft, StateLike } from "./mute.types";
 import type { InternalStateLike } from "./store-internals";
@@ -23,7 +25,8 @@ export const create = <Value>(initialState: Value): StateLike<Value> => {
     );
   }
 
-  const listeners = new Set<() => void>();
+  const immediateListeners = new Set<() => void>();
+  const scheduledListeners = new Set<() => void>();
   const mutableState = initialState as MutableDraft<Value>;
   const versionedSnapshotController = createVersionedSnapshotController(
     mutableState as DeepReadonly<Value>,
@@ -34,12 +37,19 @@ export const create = <Value>(initialState: Value): StateLike<Value> => {
     set: (updater) => {
       updater(mutableState);
       versionedSnapshotController.commit(mutableState as DeepReadonly<Value>);
-      notifyListeners(listeners);
+      notifyListeners(immediateListeners);
+      scheduleListeners(scheduledListeners);
     },
     subscribe: (callback) => {
-      listeners.add(callback);
+      scheduledListeners.add(callback);
       return () => {
-        listeners.delete(callback);
+        scheduledListeners.delete(callback);
+      };
+    },
+    [SUBSCRIBE_IMMEDIATE]: (callback) => {
+      immediateListeners.add(callback);
+      return () => {
+        immediateListeners.delete(callback);
       };
     },
     [GET_VERSIONED_SNAPSHOT]: versionedSnapshotController.getSnapshot,

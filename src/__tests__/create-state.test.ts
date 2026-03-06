@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 
 import { create } from "../create-state";
 
+const flushMicrotasks = async (): Promise<void> => {
+  await Promise.resolve();
+};
+
 describe("create", () => {
   test("mutates nested object/array/map/set in place", () => {
     const key = { id: "key" };
@@ -34,7 +38,7 @@ describe("create", () => {
     expect(next.map.get(key)?.count).toBe(2);
   });
 
-  test("notifies on every successful set, including no-op updater", () => {
+  test("coalesces synchronous sets into one scheduled notification", async () => {
     const state = create({ value: 1 });
     let notifyCount = 0;
     const unsubscribe = state.subscribe(() => {
@@ -48,12 +52,15 @@ describe("create", () => {
       draft.value = 2;
     });
 
+    expect(notifyCount).toBe(0);
+    await flushMicrotasks();
+
     unsubscribe();
-    expect(notifyCount).toBe(2);
+    expect(notifyCount).toBe(1);
     expect(state.get().value).toBe(2);
   });
 
-  test("does not notify after unsubscribe", () => {
+  test("does not notify listener unsubscribed before scheduled flush", async () => {
     const state = create({ value: 0 });
     let notifyCount = 0;
 
@@ -69,8 +76,92 @@ describe("create", () => {
       draft.value = 2;
     });
 
-    expect(notifyCount).toBe(1);
+    await flushMicrotasks();
+
+    expect(notifyCount).toBe(0);
     expect(state.get().value).toBe(2);
+  });
+
+  test("schedules updates from different states in the same microtask flush", async () => {
+    const leftState = create({ value: 0 });
+    const rightState = create({ value: 0 });
+    let leftNotifyCount = 0;
+    let rightNotifyCount = 0;
+
+    leftState.subscribe(() => {
+      leftNotifyCount += 1;
+    });
+    rightState.subscribe(() => {
+      rightNotifyCount += 1;
+    });
+
+    leftState.set((draft) => {
+      draft.value = 1;
+    });
+    rightState.set((draft) => {
+      draft.value = 1;
+    });
+    leftState.set((draft) => {
+      draft.value = 2;
+    });
+    rightState.set((draft) => {
+      draft.value = 2;
+    });
+
+    expect(leftNotifyCount).toBe(0);
+    expect(rightNotifyCount).toBe(0);
+
+    await flushMicrotasks();
+
+    expect(leftNotifyCount).toBe(1);
+    expect(rightNotifyCount).toBe(1);
+    expect(leftState.get().value).toBe(2);
+    expect(rightState.get().value).toBe(2);
+  });
+
+  test("coalesces 3 updates across 3 created states into one notification per state", async () => {
+    const firstState = create({ value: 0 });
+    const secondState = create({ value: 0 });
+    const thirdState = create({ value: 0 });
+
+    let firstNotifyCount = 0;
+    let secondNotifyCount = 0;
+    let thirdNotifyCount = 0;
+
+    firstState.subscribe(() => {
+      firstNotifyCount += 1;
+    });
+    secondState.subscribe(() => {
+      secondNotifyCount += 1;
+    });
+    thirdState.subscribe(() => {
+      thirdNotifyCount += 1;
+    });
+
+    for (let nextValue = 1; nextValue <= 3; nextValue += 1) {
+      firstState.set((draft) => {
+        draft.value = nextValue;
+      });
+      secondState.set((draft) => {
+        draft.value = nextValue;
+      });
+      thirdState.set((draft) => {
+        draft.value = nextValue;
+      });
+    }
+
+    expect(firstNotifyCount).toBe(0);
+    expect(secondNotifyCount).toBe(0);
+    expect(thirdNotifyCount).toBe(0);
+
+    await flushMicrotasks();
+
+    expect(firstNotifyCount).toBe(1);
+    expect(secondNotifyCount).toBe(1);
+    expect(thirdNotifyCount).toBe(1);
+    expect(firstState.get().value).toBe(3);
+    expect(secondState.get().value).toBe(3);
+    expect(thirdState.get().value).toBe(3);
   });
 
   test("supports array roots", () => {
@@ -108,7 +199,7 @@ describe("create", () => {
     expect(state.get().has("b")).toBe(true);
   });
 
-  test("throws updater errors and does not notify", () => {
+  test("throws updater errors and does not notify", async () => {
     const state = create({ value: 0 });
     let notifyCount = 0;
 
@@ -122,11 +213,13 @@ describe("create", () => {
       });
     }).toThrow("boom");
 
+    await flushMicrotasks();
     expect(notifyCount).toBe(0);
 
     state.set((draft) => {
       draft.value = 1;
     });
+    await flushMicrotasks();
     expect(state.get().value).toBe(1);
   });
 

@@ -59,6 +59,39 @@ describe("useStore", () => {
     expect(screen.getByTestId("full-snapshot").textContent).toBe("1:true");
   });
 
+  test("coalesces multiple synchronous sets into one rerender when selector is omitted", async () => {
+    const state = create({ count: 0 });
+    const renderHistory: number[] = [];
+
+    const Counter = (): React.ReactElement => {
+      const snapshot = useStore(state);
+      renderHistory.push(snapshot.count);
+      return React.createElement(
+        "span",
+        { "data-testid": "batched-counter" },
+        snapshot.count,
+      );
+    };
+
+    render(React.createElement(Counter));
+    expect(renderHistory).toEqual([0]);
+
+    await act(async () => {
+      state.set((draft) => {
+        draft.count = 1;
+      });
+      state.set((draft) => {
+        draft.count = 2;
+      });
+      state.set((draft) => {
+        draft.count = 3;
+      });
+    });
+
+    expect(renderHistory).toEqual([0, 3]);
+    expect(screen.getByTestId("batched-counter").textContent).toBe("3");
+  });
+
   test("rerenders only when selected slice changes", async () => {
     const state = create({
       count: 0,

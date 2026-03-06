@@ -43,6 +43,12 @@ No return value, no manual spreading.
 bun add mut-state
 ```
 
+## Example App
+
+A minimal Vite todo-list example is available at:
+
+- `examples/example_0`
+
 ## Core API
 
 ```ts
@@ -68,9 +74,11 @@ Creates read-only derived state from one or more source states.
 
 React hook for subscriptions.
 
-- Without selector: returns full state snapshot and rerenders on each successful `set`.
+- Without selector: returns full state snapshot and rerenders on scheduled flushes after successful `set` calls.
 - With selector: rerenders only when selected value changes (`Object.is` by default).
 - Optional custom comparator with `isEqual`.
+
+Updates are delivered through a shared microtask scheduler, so many synchronous `set(...)` calls are coalesced into one notification flush.
 
 ## How It Works Internally (Simple)
 
@@ -78,7 +86,7 @@ React hook for subscriptions.
 2. `set(draft => { ... })` executes your updater on that object.
 3. On successful `set`, `mut-state` increments a version and notifies subscribers once.
 4. `useStore(...)` subscribes through `useSyncExternalStoreWithSelector`:
-   - no selector: rerender on each successful `set`
+   - no selector: rerender on successful `set` flushes
    - selector: rerender only when selected output changes (`isEqual` / `Object.is`)
 5. `derive(...)` subscribes to source states and recomputes only when derived output changes.
 
